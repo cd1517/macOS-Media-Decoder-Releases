@@ -1,0 +1,71 @@
+name: Build and publish decoder component
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build.yml
+      - scripts/**
+      - tests/**
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            artifact: arm64
+          - runner: macos-15-intel
+            artifact: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: brew install meson ninja pkg-config ffmpeg libass libplacebo
+      - name: Validate repository layout
+        run: sh ./tests/validate-layout.sh
+      - name: Build libmpv
+        run: sh ./scripts/build-libmpv.sh build
+      - name: Package component
+        run: bash ./scripts/package-component.sh build/stage dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HoverPreviewDecoder-${{ matrix.artifact }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: HoverPreviewDecoder-*
+          path: dist
+          merge-multiple: true
+      - name: Publish reusable decoder component
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.41.0-1
+          target_commitish: main
+          name: HoverPreview Decoder 0.41.0-1
+          make_latest: true
+          files: dist/*.zip
+          body: |
+            HoverPreview 1.9.6 可选的可复用视频解码组件。
+
+            - 安装一次后直接播放已启用的扩展格式
+            - 不生成逐文件兼容副本，不修改原视频
+            - 分别提供 Apple Silicon 与 Intel 架构
+            - 最低系统：macOS 13
+            - App 会在安装前验证固定的文件大小与 SHA-256
+
+            许可证及依赖版权文件包含在每个组件压缩包内。
